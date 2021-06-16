@@ -1,14 +1,17 @@
-from django.db.models.expressions import F
 from django.http import HttpResponse, HttpResponseBadRequest, \
     HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
+from linebot import models
 from linebot.exceptions import InvalidSignatureError, LineBotApiError
-from linebot.models import MessageEvent, TextSendMessage, ImagemapArea, ImagemapSendMessage, URIImagemapAction, BaseSize
+from linebot.models import MessageEvent, TextSendMessage, ImagemapArea, ImagemapSendMessage, URIImagemapAction, BaseSize, messages
 from linebot import LineBotApi, WebhookParser
 from linebot.models.imagemap import MessageImagemapAction
-from .models import LineUser, Group, Association
+from .models import LineUser, Group, Association, FightData
 import os
+from .fightname import FightAction
+import uuid
+
 
 basePath = os.path.abspath(os.path.dirname(__name__))
 # 套用settings.py 的屬性
@@ -30,7 +33,9 @@ commandMember = {
     "C0002": "查詢用戶ID",
     "C0003": "查詢餘額",
     "C0004": "下載連結",
-    "C0005": "查看可用指令"
+    "C0005": "查看可用指令",
+    "C0006": "建立對戰",
+    "C0007": "加入對戰",
 }
 
 
@@ -67,25 +72,11 @@ def callback(request):
                     )
                 else:
                     if command == commandAdmin["A0000"]:
-                        textList = str(event.message.text).split(":")
-                        if len(textList) == 2:
-                            setUserPermissions(event, textList[1])
-                        else:
-                            line_bot_api.reply_message(
-                                event.reply_token,
-                                TextSendMessage(
-                                    text="請依照以下格式輸入指令\n設置管理員:Line ID")
-                            )
+                        setAdminUser(event)
                     elif command == commandAdmin["A0001"]:
                         getAllUserAmount(event)
                     elif command == commandAdmin["A9999"]:
-                        userId = str(event.message.text).split(":")[1]
-                        groupId = event.source.group_id
-                        flag = isUserInGroup(userId, groupId)
-                        line_bot_api.reply_message(
-                            event.reply_token,
-                            TextSendMessage(text=str(flag))
-                        )
+                        pass
                     elif command == commandMember["C0000"]:
                         getUserPermissions(event)
                     elif command == commandMember["C0001"]:
@@ -97,20 +88,19 @@ def callback(request):
                     elif command == commandMember["C0004"]:
                         getDownloadLink(event)
                     elif command == commandMember["C0005"]:
-                        if isAdministrator(event):
-                            returnText = "你目前可用指令：\n" + \
-                                getCommandList(commandAdmin, commandMember)
+                        getUsefulCommand(event)
+                    elif command == commandMember["C0006"]:
+                        getFightID(event)
+                    elif command == commandMember["C0007"]:
+                        argumentList = getCommandArgument(event.message.text)
+                        if isFinishGame(argumentList[1]):
                             line_bot_api.reply_message(
                                 event.reply_token,
-                                TextSendMessage(text=returnText)
+                                TextSendMessage(text="此戰場已結束。")
                             )
                         else:
-                            returnText = "你目前可用指令：\n" + \
-                                getCommandList(commandMember)
-                            line_bot_api.reply_message(
-                                event.reply_token,
-                                TextSendMessage(text=returnText)
-                            )
+                            joinFight(event)
+                            startFight2(event, argumentList[1])
             else:
                 pass
         return HttpResponse()
@@ -215,6 +205,19 @@ def setUserPermissions(event, lineID):
         )
 
 
+def setAdminUser(event):
+    """根據ID設置管理員"""
+    userList = getCommandArgument(event.message.text)
+    if userList[0] == commandAdmin["A0000"]:
+        message = "請依照以下格式輸入指令\n%s:Line ID" % commandAdmin["A0000"]
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=message)
+        )
+    else:
+        setUserPermissions(event, userList[0])
+
+
 def getCommandList(*args):
     '''取得目前可用指令'''
     flag = len(args)
@@ -315,3 +318,168 @@ def getDownloadLink(event):
             ]
         )
     )
+
+
+def getCommandArgument(commandText):
+    """將指令內的參數內容 以串列返回"""
+    commandList = str(commandText).split(":")
+    if len(commandList) == 1:
+        return commandList
+    else:
+        argumentList = str(commandList[1]).split(",")
+        return argumentList
+
+
+def getUsefulCommand(event):
+    """取得可用指令"""
+    if isAdministrator(event):
+        returnText = "你目前可用指令：\n" + \
+            getCommandList(commandAdmin, commandMember)
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=returnText)
+        )
+    else:
+        returnText = "你目前可用指令：\n" + \
+            getCommandList(commandMember)
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=returnText)
+        )
+
+
+def getFightID(event):
+    """建立對戰資料庫並回傳戰場ID"""
+    roleName = getCommandArgument(event.message.text)
+    if roleName[0] == commandMember["C0006"]:
+        message = "請依照以下格式輸入指令\n\n%s:角色名" % commandMember["C0006"]
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=message)
+        )
+    else:
+        inviteId = uuid.uuid4()
+        creatorLineId = event.source.user_id
+        addDataTemp = FightData(
+            creatorUserId=creatorLineId,
+            creatorRoleName=roleName[0],
+            fightID=inviteId
+        )
+        addDataTemp.save()
+        message = "此次戰場ID:%s，另一位參戰者請輸入指令“加入對戰:角色名,戰場ID” " % inviteId
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=message)
+        )
+
+
+def joinFight(event):
+    """根據戰場ID加入對戰資料庫"""
+    argumentList = getCommandArgument(event.message.text)
+    if len(argumentList) < 2:
+        message = "請依照以下格式輸入指令\n%s:角色名,戰場ID" % commandMember["C0007"]
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=message)
+        )
+    elif FightData.objects.filter(fightID=argumentList[1]).exists():
+        fightQueryset = FightData.objects.filter(fightID=argumentList[1])
+        participantUserId = event.source.user_id
+        fightQueryset.update(
+            participantUserId=participantUserId,
+            participantRoleName=argumentList[0]
+        )
+    else:
+        message = "查無此戰場ID : %s" % argumentList[1]
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=message)
+        )
+
+
+def isFinishGame(fightId):
+    """判斷是否為完成的戰場"""
+    return FightData.objects.filter(fightID=fightId, fightState="Finish").exists()
+
+
+def startFight(event, fightId):
+    """戰鬥訊息"""
+    fightDetailText = ''
+    fightDetailList = []
+    fightQuerySet = FightData.objects.filter(fightID=fightId)
+    creatorRoleName = fightQuerySet.values_list('creatorRoleName')
+    participantRoleName = fightQuerySet.values_list('participantRoleName')
+    fight = FightAction(creatorRoleName[0][0], participantRoleName[0][0])
+    fightDetailList.append(fight.getRoleInfoList(fight.roleA_Info) + "\n\n")
+    fightDetailList.append(fight.getRoleInfoList(fight.roleB_Info) + "\n")
+    while True:
+        if fight.firstAttack:
+            fightDetailList.append(fight.attackActionAB() + "\n")
+            if fight.isAnyHPZero():
+                for detail in fightDetailList:
+                    line_bot_api.push_message(
+                        event.source.group_id,
+                        TextSendMessage(text=detail)
+                    )
+                break
+            fightDetailList.append(fight.attackActionBA() + "\n")
+        else:
+            fightDetailList.append(fight.attackActionBA() + "\n")
+            if fight.isAnyHPZero():
+                for detail in fightDetailList:
+                    line_bot_api.push_message(
+                        event.source.group_id,
+                        TextSendMessage(text=detail)
+                    )
+                break
+            fightDetailList.append(fight.attackActionAB() + "\n")
+        if fight.isAnyHPZero():
+            for detail in fightDetailList:
+                line_bot_api.push_message(
+                    event.source.group_id,
+                    TextSendMessage(text=detail)
+                )
+            break
+        for detail in fightDetailList:
+            fightDetailText += detail
+        FightData.objects.filter(fightID=fightId).update(
+            fightDetial=fightDetailText, fightState="Finish")
+
+
+def startFight2(event, fightId):
+    """戰場遊戲測試用"""
+    fightMessageText = ''
+    fightQuerySet = FightData.objects.filter(fightID=fightId)
+    creatorRoleName = fightQuerySet.values_list('creatorRoleName')
+    participantRoleName = fightQuerySet.values_list('participantRoleName')
+    fight = FightAction(creatorRoleName[0][0], participantRoleName[0][0])
+    fightMessageText += fight.getRoleInfoList(fight.roleA_Info) + "\n\n"
+    fightMessageText += fight.getRoleInfoList(fight.roleB_Info) + "\n\n"
+    while True:
+        if fight.firstAttack:
+            # True則A先攻
+            fightMessageText += fight.attackActionAB() + "\n"
+            if fight.isAnyHPZero():
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text=fightMessageText)
+                )
+                break
+            fightMessageText += fight.attackActionBA() + "\n"
+        else:
+            fightMessageText += fight.attackActionBA() + "\n"
+        if fight.isAnyHPZero():
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=fightMessageText)
+            )
+            break
+        fightMessageText += fight.attackActionAB() + "\n"
+        if fight.isAnyHPZero():
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=fightMessageText)
+            )
+            break
+    FightData.objects.filter(fightID=fightId).update(
+        fightDetial=fightMessageText, fightState="Finish")
