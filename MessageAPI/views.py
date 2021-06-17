@@ -36,6 +36,7 @@ commandMember = {
     "C0005": "查看可用指令",
     "C0006": "建立對戰",
     "C0007": "加入對戰",
+    "C0008": "取得對戰紀錄",
 }
 
 
@@ -92,15 +93,7 @@ def callback(request):
                     elif command == commandMember["C0006"]:
                         getFightID(event)
                     elif command == commandMember["C0007"]:
-                        argumentList = getCommandArgument(event.message.text)
-                        if isFinishGame(argumentList[1]):
-                            line_bot_api.reply_message(
-                                event.reply_token,
-                                TextSendMessage(text="此戰場已結束。")
-                            )
-                        else:
-                            joinFight(event)
-                            startFight2(event, argumentList[1])
+                        getStartFight(event)
             else:
                 pass
         return HttpResponse()
@@ -348,6 +341,7 @@ def getUsefulCommand(event):
         )
 
 
+# 以下為戰場小遊戲使用
 def getFightID(event):
     """建立對戰資料庫並回傳戰場ID"""
     roleName = getCommandArgument(event.message.text)
@@ -366,7 +360,8 @@ def getFightID(event):
             fightID=inviteId
         )
         addDataTemp.save()
-        message = "此次戰場ID:%s，另一位參戰者請輸入指令“加入對戰:角色名,戰場ID” " % inviteId
+        message = "此次戰場ID:%s\n另一位參戰者請輸入以下指令\n\n加入對戰:角色名,%s" % (
+            inviteId, inviteId)
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text=message)
@@ -397,13 +392,23 @@ def joinFight(event):
         )
 
 
+def isFightIDExists(fightId):
+    """判斷戰場ID是否存在"""
+    querySet = FightData.objects.filter(fightID=fightId)
+    return querySet.exists()
+
+
 def isFinishGame(fightId):
     """判斷是否為完成的戰場"""
-    return FightData.objects.filter(fightID=fightId, fightState="Finish").exists()
+    querySet = FightData.objects.filter(fightID=fightId).values("fightState")
+    if querySet[0]["fightState"] == "Undone":
+        return False
+    elif querySet[0]["fightState"] == "Finish":
+        return True
 
 
 def startFight(event, fightId):
-    """戰鬥訊息"""
+    """開始戰鬥 可逐一發送消息 使用Push可能需要費用"""
     fightDetailText = ''
     fightDetailList = []
     fightQuerySet = FightData.objects.filter(fightID=fightId)
@@ -447,7 +452,7 @@ def startFight(event, fightId):
 
 
 def startFight2(event, fightId):
-    """戰場遊戲測試用"""
+    """開始戰鬥 使用reply直接發送結果"""
     fightMessageText = ''
     fightQuerySet = FightData.objects.filter(fightID=fightId)
     creatorRoleName = fightQuerySet.values_list('creatorRoleName')
@@ -483,3 +488,22 @@ def startFight2(event, fightId):
             break
     FightData.objects.filter(fightID=fightId).update(
         fightDetial=fightMessageText, fightState="Finish")
+
+
+def getStartFight(event):
+    """開始戰鬥"""
+    argumentList = getCommandArgument(event.message.text)
+    if isFightIDExists(argumentList[1]):
+        if isFinishGame(argumentList[1]):
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="此戰場已結束。")
+            )
+        else:
+            joinFight(event)
+            startFight2(event, argumentList[1])
+    else:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="此戰場ID不存在。")
+        )
