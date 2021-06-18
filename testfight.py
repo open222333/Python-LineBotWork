@@ -1,19 +1,23 @@
-from MessageAPI.fightname import FightAction
-# 以下為測試用程式碼
-test = FightAction("角色A", "角色B")
-print(test.getRoleInfoList(test.roleA_Info))
-print(test.getRoleInfoList(test.roleB_Info))
-while True:
-    if test.firstAttack:
-        # True則A先攻
-        print(test.attackActionAB())
-        if test.isAnyHPZero():
-            break
-        print(test.attackActionBA())
-    else:
-        print(test.attackActionBA())
-        if test.isAnyHPZero():
-            break
-        print(test.attackActionAB())
-    if test.isAnyHPZero():
-        break
+from rpgMessage import Role,FightAction
+
+test = Role("test")
+# print(test.getRoleAbilityValue())
+print(test.getRoleInfo())
+# for i in test.getSkill(test.getPosition()[1]):
+#     print(i)
+
+# print(test.getRoleAbilityValue())
+
+
+# role = FightAction("role1","role2")
+# print(role.isDouble(92))
+
+# count = 1
+# testN = 0
+# while True:
+#     if role.isSkillAttack(20):
+#         testN += 1
+#     if count == 1000000:
+#         break
+#     count += 1
+# print(testN/count)

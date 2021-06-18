@@ -1,5 +1,4 @@
 from django.db import models
-from datetime import datetime
 
 
 class LineUser(models.Model):
@@ -9,12 +8,12 @@ class LineUser(models.Model):
     userPermissionsTuple = [
         (100, 'Admin'), (30, 'Common Member'), (0, 'New Member')]
     userPermissions = models.IntegerField(choices=userPermissionsTuple)
-    createDate = models.DateTimeField(default=str(datetime.now())[:-7])
+    createDate = models.DateTimeField()
 
 
 class Group(models.Model):
     groupID = models.TextField()
-    createDate = models.DateTimeField(default=str(datetime.now())[:-7])
+    createDate = models.DateTimeField()
 
 
 class Association(models.Model):
@@ -28,6 +27,6 @@ class FightData(models.Model):
     participantUserId = models.TextField()
     participantRoleName = models.TextField()
     fightID = models.TextField()
-    fightingCreateDateTime = models.DateTimeField(default=str(datetime.now())[:-7])
+    fightingCreateDateTime = models.DateTimeField()
     fightDetial = models.TextField()
     fightState = models.CharField(max_length=10, default="Undone")

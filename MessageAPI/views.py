@@ -2,7 +2,7 @@ from django.http import HttpResponse, HttpResponseBadRequest, \
     HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
-from linebot import models
+from django.utils import timezone
 from linebot.exceptions import InvalidSignatureError, LineBotApiError
 from linebot.models import MessageEvent, TextSendMessage, ImagemapArea, ImagemapSendMessage, URIImagemapAction, BaseSize, messages
 from linebot import LineBotApi, WebhookParser
@@ -24,6 +24,8 @@ click_link_1 = "https://drive.google.com/file/d/1U3qbnO-TAh08neC8DtveOM9mSw7Gu9f
 commandAdmin = {
     "A0000": "設置管理員",
     "A0001": "查詢所有餘額",
+    "A0002": "查詢所有用戶ID",
+    "A0003": "未完成的對戰",
     "A9999": "測試用指令",
 }
 
@@ -36,7 +38,6 @@ commandMember = {
     "C0005": "查看可用指令",
     "C0006": "建立對戰",
     "C0007": "加入對戰",
-    "C0008": "取得對戰紀錄",
 }
 
 
@@ -76,6 +77,10 @@ def callback(request):
                         setAdminUser(event)
                     elif command == commandAdmin["A0001"]:
                         getAllUserAmount(event)
+                    elif command == commandAdmin["A0002"]:
+                        getAllUserID(event)
+                    elif command == commandAdmin["A0003"]:
+                        getNotFinishFightID(event)
                     elif command == commandAdmin["A9999"]:
                         pass
                     elif command == commandMember["C0000"]:
@@ -142,7 +147,8 @@ def addUserData(event):
         lineID=userLineId,
         userLevel=0,
         userAmount=0,
-        userPermissions=0
+        userPermissions=0,
+        createDate=timezone.now()
     )
     addDataTemp.save()
 
@@ -150,7 +156,10 @@ def addUserData(event):
 def addGroupData(event):
     '''添加群組ID至資料表 Group'''
     userGroupId = event.source.group_id
-    addDataTemp = Group(groupID=userGroupId)
+    addDataTemp = Group(
+        groupID=userGroupId,
+        createDate=timezone.now()
+        )
     addDataTemp.save()
 
 
@@ -175,7 +184,7 @@ def setUserCommandList(*args: dict):
 
 
 def setUserPermissions(event, lineID):
-    '''設置會員權限'''
+    '''設置管理員權限'''
     if isAdministrator(event):
         if isInLineUserData(lineID):
             LineUser.objects.filter(lineID=lineID).update(userPermissions=100)
@@ -208,7 +217,15 @@ def setAdminUser(event):
             TextSendMessage(text=message)
         )
     else:
-        setUserPermissions(event, userList[0])
+        permissions = LineUser.objects.filter(lineID=userList[0])
+        permissions = permissions.values("userPermissions").get()
+        if permissions["userPermissions"] == 100:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="此ID已有管理員權限")
+            )
+        else:
+            setUserPermissions(event, userList[0])
 
 
 def getCommandList(*args):
@@ -287,6 +304,23 @@ def getAllUserAmount(event):
     )
 
 
+def getAllUserID(event):
+    '''取得所有使用者的LineID'''
+    lineIDQuerySet = LineUser.objects.all()
+    textGetID = ''
+    count = 1
+    for UserlineID in lineIDQuerySet.values('lineID'):
+        if len(lineIDQuerySet) == count:
+            textGetID += "%s" % UserlineID["lineID"]
+        else:
+            textGetID += "%s\n" % UserlineID["lineID"]
+            count += 1
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=textGetID)
+    )
+
+
 def getDownloadLink(event):
     '''取得圖片 左半邊是回覆文字訊息 右半開啟連結'''
     line_bot_api.reply_message(
@@ -357,6 +391,7 @@ def getFightID(event):
         addDataTemp = FightData(
             creatorUserId=creatorLineId,
             creatorRoleName=roleName[0],
+            fightingCreateDateTime=timezone.now(),
             fightID=inviteId
         )
         addDataTemp.save()
@@ -366,6 +401,23 @@ def getFightID(event):
             event.reply_token,
             TextSendMessage(text=message)
         )
+
+
+def getNotFinishFightID(event):
+    """取得所有未完成戰場ID"""
+    querySet = FightData.objects.filter(fightState="Undone").values("fightID")
+    returnText = ''
+    count = 1
+    for item in querySet:
+        if len(querySet) == count:
+            returnText += item["fightID"]
+        else:
+            returnText += item["fightID"] + "\n"
+            count += 1
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=returnText)
+    )
 
 
 def joinFight(event):
