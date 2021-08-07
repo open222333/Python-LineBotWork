@@ -4,12 +4,12 @@ from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 from django.utils import timezone
 from linebot.exceptions import InvalidSignatureError, LineBotApiError
-from linebot.models import MessageEvent, TextSendMessage, ImagemapArea, ImagemapSendMessage, URIImagemapAction, BaseSize, messages
+from linebot.models import MessageEvent, TextSendMessage, ImagemapArea, ImagemapSendMessage, URIImagemapAction, BaseSize
 from linebot import LineBotApi, WebhookParser
 from linebot.models.imagemap import MessageImagemapAction
-from .models import LineUser, Group, Association, RoleData, Skill, Job, 
+from .models import LineUser, Group, Association, RoleData, Skill, Job
 import os
-import uuid
+from .HWClass.RoleCreate import CreateRole
 
 
 basePath = os.path.abspath(os.path.dirname(__name__))
@@ -32,8 +32,8 @@ commandMember = {
     "C0001": "查詢群組ID",
     "C0002": "查詢用戶ID",
     "C0003": "查詢餘額",
-    "C0004": "下載連結",
-    "C0005": "查看可用指令",
+    "C0004": "查看可用指令",
+    "C0005": "建立角色",
 }
 
 
@@ -41,13 +41,17 @@ commandMember = {
 def callback(request):
     if request.method == "POST":
         signature = request.META['HTTP_X_LINE_SIGNATURE']
+        print(signature)
         body = request.body.decode('utf-8')
-        try:
-            events = parser.parse(body, signature)  # 傳入的事件
-        except InvalidSignatureError:
-            return HttpResponseForbidden()
-        except LineBotApiError:
-            return HttpResponseBadRequest()
+        print(body)
+        events = parser.parse(body, signature)
+        print(events)
+        # try:
+        #     events = parser.parse(body, signature)  # 傳入的事件
+        # except InvalidSignatureError:
+        #     return HttpResponseForbidden()
+        # except LineBotApiError:
+        #     return HttpResponseBadRequest()
     for event in events:
         if isinstance(event, MessageEvent):  # 如果有訊息事件
             # 會員資料庫
@@ -86,9 +90,9 @@ def callback(request):
                     elif command == commandMember["C0003"]:
                         getUserAmount(event)
                     elif command == commandMember["C0004"]:
-                        getDownloadLink(event)
-                    elif command == commandMember["C0005"]:
                         getUsefulCommand(event)
+                    elif command == commandMember["C0005"]:
+                        createRole(event)
             else:
                 pass
         return HttpResponse()
@@ -201,7 +205,7 @@ def setAdminUser(event):
     """根據ID設置管理員"""
     userList = getCommandArgument(event.message.text)
     if userList[0] == commandAdmin["A0000"]:
-        message = "請依照以下格式輸入指令\n%s:Line ID" % commandAdmin["A0000"]
+        message = "請依照以下格式輸入指令\n%s:Line ID" % commandAdmin["commandMember"]
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text=message)
@@ -363,3 +367,54 @@ def getUsefulCommand(event):
             event.reply_token,
             TextSendMessage(text=returnText)
         )
+
+#####################################
+# HWClass 會員使用
+#####################################
+
+
+def createRole(event):
+    command = getCommandArgument(event.message.text)
+    if len(command) < 2:
+        message = "請依照以下格式輸入指令\n%s:角色名,職業" % commandMember["C0005"]
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=message)
+        )
+    else:
+        if Job.objects.filter(JobName=command[1]).exists():
+            newRole = CreateRole(command[0]).createRole()
+            addDataTemp = RoleData(
+                creatorLineId=event.source.user_id,
+                RoleName=command[0],  # 角色名
+                RoleLevel=1,  # 角色等級
+                RoleExp=0,  # 角色經驗
+                RoleTolExp=0,  # 角色總經驗
+                RoleCreateDateTime=timezone.now(),  # 創建日期
+                HP=newRole["HP"],  # 血量
+                MP=newRole["MP"],  # 魔力
+                Str=newRole["Str"],  # 力
+                Dex=newRole["Dex"],  # 敏
+                Vit=newRole["Vit"],  # 體
+                Spi=newRole["Spi"]  # 精
+            )
+            addDataTemp.save()
+        else:
+            jobList = []
+            for job in Job.objects.all().values_list("JobName"):
+                if job in jobList:
+                    pass
+                else:
+                    jobList.append(job)
+            message = "目前職業有:"
+            for job in jobList:
+                message += str(job) + " "
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=message)
+            )
+
+
+#####################################
+# HWClass 管理員使用
+#####################################
